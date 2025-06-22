@@ -21,12 +21,10 @@ func Start(cfg config.Config) error {
 	if addr == "" {
 		addr = ":8080"
 	}
-
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Request %s %s\n", r.Method, r.Host)
 		HandleRequest(w, r, cfg)
 	})
-
 	log.Printf("Starting proxy on %s (upstream=%s, auth=%s, exceptions=%v)\n",
 		addr, cfg.UpstreamProxy, cfg.ProxyAuth, cfg.ProxyExceptions,
 	)
@@ -66,7 +64,6 @@ func proxyToUpstream(w http.ResponseWriter, req *http.Request, cfg config.Config
 	client := &http.Client{
 		Transport: newUpstreamTransport(cfg),
 	}
-
 	outbound := cloneRequestForClient(req)
 	resp, err := client.Do(outbound)
 	if err != nil {
@@ -89,22 +86,18 @@ func cloneRequestForClient(req *http.Request) *http.Request {
 
 func newUpstreamTransport(cfg config.Config) http.RoundTripper {
 	proxyURL, _ := url.Parse("http://" + cfg.UpstreamProxy)
-
 	base := &http.Transport{
 		Proxy: http.ProxyURL(proxyURL),
 	}
-
 	if strings.EqualFold(cfg.ProxyAuth, "ntlm") {
 		base.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{} // Disable HTTP/2 for NTLM
 		return ntlmssp.Negotiator{RoundTripper: base}
 	}
-
 	return base
 }
 
 func handleTunneling(w http.ResponseWriter, req *http.Request, cfg config.Config) {
 	dest := req.Host
-
 	if shouldBypass(dest, cfg.ProxyExceptions) {
 		tunnel(w, req, dest)
 	} else {
@@ -115,64 +108,68 @@ func handleTunneling(w http.ResponseWriter, req *http.Request, cfg config.Config
 func tunnel(w http.ResponseWriter, _ *http.Request, dest string) {
 	backend, err := net.Dial("tcp", dest)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		http.Error(w, fmt.Sprintf("Failed to connect to destination %s: %v", dest, err), http.StatusServiceUnavailable)
 		return
 	}
+	defer func() {
+		if backend != nil {
+			backend.Close()
+		}
+	}()
 	hj, ok := w.(http.Hijacker)
 	if !ok {
-		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
-		backend.Close()
+		http.Error(w, "HTTP Hijacking not supported", http.StatusInternalServerError)
 		return
 	}
 	clientConn, _, err := hj.Hijack()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		backend.Close()
+		http.Error(w, fmt.Sprintf("Failed to hijack connection: %v", err), http.StatusServiceUnavailable)
 		return
 	}
-
-	fmt.Fprintf(clientConn, "HTTP/1.1 200 Connection Established\r\n\r\n")
+	_, _ = fmt.Fprint(clientConn, "HTTP/1.1 200 Connection Established\r\n\r\n")
+	backend = nil
 	pipe(clientConn, backend)
 }
 
 func tunnelViaUpstream(w http.ResponseWriter, _ *http.Request, cfg config.Config, dest string) {
-	backendConn, err := net.Dial("tcp", cfg.UpstreamProxy)
+	proxyAddr := cfg.UpstreamProxy
+	conn, err := net.Dial("tcp", proxyAddr)
 	if err != nil {
 		http.Error(w, "Failed to connect to upstream proxy: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-
-	fmt.Fprintf(backendConn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", dest, dest)
-
-	br := bufio.NewReader(backendConn)
+	connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", dest, dest)
+	if _, err := conn.Write([]byte(connectReq)); err != nil {
+		conn.Close()
+		http.Error(w, "Failed to send CONNECT request: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	br := bufio.NewReader(conn)
 	resp, err := http.ReadResponse(br, &http.Request{Method: http.MethodConnect})
 	if err != nil {
-		backendConn.Close()
-		http.Error(w, "Failed to read upstream response: "+err.Error(), http.StatusBadGateway)
+		conn.Close()
+		http.Error(w, "Failed to read proxy response: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 	if resp.StatusCode != http.StatusOK {
-		backendConn.Close()
-		http.Error(w, "Upstream proxy CONNECT failed: "+resp.Status, http.StatusBadGateway)
+		conn.Close()
+		http.Error(w, "Proxy CONNECT failed: "+resp.Status, http.StatusBadGateway)
 		return
 	}
-
 	hj, ok := w.(http.Hijacker)
 	if !ok {
-		backendConn.Close()
+		conn.Close()
 		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
 		return
 	}
 	clientConn, _, err := hj.Hijack()
 	if err != nil {
-		backendConn.Close()
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		conn.Close()
+		http.Error(w, "Failed to hijack connection: "+err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-
 	fmt.Fprintf(clientConn, "HTTP/1.1 200 Connection Established\r\n\r\n")
-
-	pipe(clientConn, backendConn)
+	pipe(clientConn, conn)
 }
 
 func shouldBypass(host string, exceptions []string) bool {
