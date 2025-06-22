@@ -52,10 +52,10 @@ sleep 1
 
 # 5) Test both endpoints via dynamic proxy
 echo "=== TEST: server1 via proxy (should bypass upstream) ==="
-curl -s -x http://127.0.0.1:8080 https://example.com/ || true
+curl -s -x http://127.0.0.1:8080 http://127.0.0.1:8001 || true
 
 echo "=== TEST: server2 via proxy (should go through upstream) ==="
-curl -s -x http://127.0.0.1:8080 https://example.com/ || true
+curl -s -x http://127.0.0.1:8080 http://127.0.0.1:8002 || true
 
 # 6) Cleanup
 echo "Cleaning up..."
