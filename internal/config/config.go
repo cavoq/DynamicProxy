@@ -8,12 +8,14 @@ import (
 type Config struct {
 	UpstreamProxy   string
 	ProxyExceptions []string
+	ListenAddr      string
 }
 
 func LoadConfig() Config {
 	config := Config{
 		UpstreamProxy:   getEnv("UPSTREAM_PROXY", ""),
 		ProxyExceptions: []string{},
+		ListenAddr:      getEnv("DYNAMIC_PROXY_LISTEN_ADDR", ":8080"),
 	}
 
 	if exceptions := os.Getenv("PROXY_EXCEPTIONS"); exceptions != "" {
