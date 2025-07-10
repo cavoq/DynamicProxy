@@ -16,8 +16,8 @@ func LoadConfig() Config {
 	config := Config{
 		UpstreamProxy:   getEnv("UPSTREAM_PROXY", ""),
 		ProxyExceptions: []string{},
-		ListenAddr:      getEnv("DYNAMIC_PROXY_LISTEN_ADDR", ":8080"),
-		ProxyAuth:       getEnv("DYNAMIC_PROXY_AUTH", ""),
+		ListenAddr:      getEnv("LISTEN_ADDR", ":8080"),
+		ProxyAuth:       getEnv("PROXY_AUTH", ""),
 	}
 
 	if exceptions := os.Getenv("PROXY_EXCEPTIONS"); exceptions != "" {
