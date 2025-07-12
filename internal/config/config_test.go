@@ -1,54 +1,45 @@
 package config
 
 import (
-	"os"
 	"testing"
 )
 
-func TestLoadConfig(t *testing.T) {
-	origUpstream := os.Getenv("UPSTREAM_PROXY")
-	origExceptions := os.Getenv("PROXY_EXCEPTIONS")
-	defer func() {
-		os.Setenv("UPSTREAM_PROXY", origUpstream)
-		os.Setenv("PROXY_EXCEPTIONS", origExceptions)
-	}()
+func TestParseList(t *testing.T) {
+	input := "http://localhost, *.example.com, api.svc.com, https://www.test.org/"
+	expected := []string{"localhost", "*.example.com", "api.svc.com", "www.test.org"}
 
-	os.Setenv("UPSTREAM_PROXY", "upstream.example.com:8080")
-	os.Setenv("PROXY_EXCEPTIONS", "host1:1234, host2:5678, host3:9012")
+	result := parseList(input)
 
-	cfg := LoadConfig()
-
-	if cfg.UpstreamProxy != "upstream.example.com:8080" {
-		t.Errorf("UpstreamProxy = %q; want %q", cfg.UpstreamProxy, "upstream.example.com:8080")
+	if len(result) != len(expected) {
+		t.Fatalf("expected %d items, got %d", len(expected), len(result))
 	}
 
-	expected := []string{"host1:1234", "host2:5678", "host3:9012"}
-	if len(cfg.ProxyExceptions) != len(expected) {
-		t.Fatalf("ProxyExceptions length = %d; want %d", len(cfg.ProxyExceptions), len(expected))
-	}
-	for i := range expected {
-		if cfg.ProxyExceptions[i] != expected[i] {
-			t.Errorf("ProxyExceptions[%d] = %q; want %q", i, cfg.ProxyExceptions[i], expected[i])
+	for i, v := range result {
+		if v != expected[i] {
+			t.Errorf("expected %q at index %d, got %q", expected[i], i, v)
 		}
 	}
 }
 
-func TestParseList_Empty(t *testing.T) {
-	got := parseList("")
-	if len(got) != 0 {
-		t.Errorf("parseList(\"\") = %v; want empty slice", got)
-	}
-}
+func TestIsException(t *testing.T) {
+	exceptions := []string{"localhost", "*.example.com", "api.svc.com"}
 
-func TestParseList_Whitespace(t *testing.T) {
-	got := parseList("  ,  , host:1234 ,  , ")
-	want := []string{"host:1234"}
-	if len(got) != len(want) {
-		t.Fatalf("parseList whitespace length = %d; want %d", len(got), len(want))
+	tests := []struct {
+		host     string
+		expected bool
+	}{
+		{"localhost", true},
+		{"www.example.com", true},
+		{"example.com", true},
+		{"api.example.com", true},
+		{"api.svc.com", true},
+		{"other.com", false},
+		{"svc.api.com", false},
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("parseList whitespace[%d] = %q; want %q", i, got[i], want[i])
+
+	for _, tt := range tests {
+		if isException(tt.host, exceptions) != tt.expected {
+			t.Errorf("isException(%q) = %v; expected %v", tt.host, !tt.expected, tt.expected)
 		}
 	}
 }

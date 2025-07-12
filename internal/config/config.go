@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net/url"
 	"os"
 	"strings"
 )
@@ -42,9 +43,32 @@ func parseList(s string) []string {
 	var list []string
 	for _, part := range parts {
 		p := strings.TrimSpace(part)
-		if p != "" {
-			list = append(list, p)
+		if p == "" {
+			continue
 		}
+
+		if strings.HasPrefix(p, "http://") || strings.HasPrefix(p, "https://") {
+			if u, err := url.Parse(p); err == nil && u.Host != "" {
+				p = u.Host
+			}
+		}
+
+		p = strings.TrimSuffix(p, "/")
+		list = append(list, p)
 	}
 	return list
+}
+
+func isException(host string, exceptions []string) bool {
+	for _, pattern := range exceptions {
+		if after, ok := strings.CutPrefix(pattern, "*."); ok {
+			suffix := after
+			if strings.HasSuffix(host, suffix) {
+				return true
+			}
+		} else if host == pattern {
+			return true
+		}
+	}
+	return false
 }
