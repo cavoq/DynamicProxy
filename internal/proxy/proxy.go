@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 
@@ -17,18 +18,23 @@ import (
 	"github.com/Azure/go-ntlmssp"
 )
 
+var (
+	Info  = log.New(os.Stdout, "INFO: ", log.Ldate|log.Ltime|log.Lmsgprefix)
+	Warn  = log.New(os.Stdout, "WARN: ", log.Ldate|log.Ltime|log.Lmsgprefix)
+	Error = log.New(os.Stderr, "ERROR: ", log.Ldate|log.Ltime|log.Lmsgprefix)
+)
+
 func Start(cfg config.Config) error {
+	Info.Printf("Starting proxy on %s (upstream=%s, auth=%s, exceptions=%v)",
+		cfg.ListenAddr, cfg.UpstreamProxy, cfg.ProxyAuth, cfg.ProxyExceptions)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Request %s %s\n", r.Method, r.Host)
 		HandleRequest(w, r, cfg)
 	})
-	log.Printf("Starting proxy on %s (upstream=%s, auth=%s, exceptions=%v)\n",
-		cfg.ListenAddr, cfg.UpstreamProxy, cfg.ProxyAuth, cfg.ProxyExceptions,
-	)
 	return http.ListenAndServe(cfg.ListenAddr, handler)
 }
 
 func HandleRequest(w http.ResponseWriter, req *http.Request, cfg config.Config) {
+	Info.Printf("Processing request %s %s", req.Method, req.Host)
 	if req.Method == http.MethodConnect {
 		HandleHttps(w, req, cfg)
 	} else {
@@ -56,7 +62,8 @@ func ProxyRequest(w http.ResponseWriter, req *http.Request, transport http.Round
 	outbound := CloneRequest(req)
 	resp, err := client.Do(outbound)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		Error.Printf("ProxyRequest error for %s %s: %v", req.Method, req.Host, err)
+		http.Error(w, http.StatusText(http.StatusBadGateway), http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
@@ -76,6 +83,8 @@ func Bypass(host string, exceptions []string) bool {
 			regex := WildcardToRegex(pattern)
 			if matched, err := regexp.MatchString(regex, host); err == nil && matched {
 				return true
+			} else if err != nil {
+				Warn.Printf("Invalid pattern %q in ProxyExceptions: %v", pattern, err)
 			}
 		} else {
 			if strings.EqualFold(host, pattern) {
@@ -95,16 +104,19 @@ func StripPort(host string) string {
 }
 
 func WildcardToRegex(pattern string) string {
-	// Escape dots, replace '*' with '.*'
 	re := regexp.QuoteMeta(pattern)
 	re = strings.ReplaceAll(re, `\*`, ".*")
 	return "^" + re + "$"
 }
 
 func NewUpstreamTransport(cfg config.Config) http.RoundTripper {
-	proxyURL, _ := url.Parse("http://" + cfg.UpstreamProxy)
+	url, err := url.Parse("http://" + cfg.UpstreamProxy)
+	if err != nil {
+		Error.Printf("Invalid upstream proxy url %q: %v", cfg.UpstreamProxy, err)
+		return http.DefaultTransport
+	}
 	base := &http.Transport{
-		Proxy: http.ProxyURL(proxyURL),
+		Proxy: http.ProxyURL(url),
 	}
 	if strings.EqualFold(cfg.ProxyAuth, "ntlm") {
 		base.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{} // Disable HTTP/2 for NTLM
@@ -123,21 +135,24 @@ func EstablishTunnel(w http.ResponseWriter, req *http.Request, cfg config.Config
 		backend, err = net.Dial("tcp", req.Host)
 	}
 	if err != nil {
-		http.Error(w, "Tunnel connection failed: "+err.Error(), http.StatusServiceUnavailable)
+		Error.Printf("Tunnel connection failed to %s: %v", req.Host, err)
+		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
 
 	hj, ok := w.(http.Hijacker)
 	if !ok {
 		backend.Close()
-		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
+		Error.Println("HTTP Hijacking not supported")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
 	clientConn, _, err := hj.Hijack()
 	if err != nil {
 		backend.Close()
-		http.Error(w, "Hijack failed: "+err.Error(), http.StatusServiceUnavailable)
+		Error.Printf("Hijack failed for %s: %v", req.Host, err)
+		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
 
@@ -189,18 +204,25 @@ func CopyResponse(w http.ResponseWriter, resp *http.Response) {
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	_, err := io.Copy(w, resp.Body)
+	if err != nil {
+		Error.Printf("Error copying response body: %v", err)
+	}
 }
 
 func Pipe(a, b net.Conn) {
 	go func() {
 		defer a.Close()
 		defer b.Close()
-		io.Copy(a, b)
+		if _, err := io.Copy(a, b); err != nil {
+			Warn.Printf("Pipe error (a->b): %v", err)
+		}
 	}()
 	go func() {
 		defer a.Close()
 		defer b.Close()
-		io.Copy(b, a)
+		if _, err := io.Copy(b, a); err != nil {
+			Warn.Printf("Pipe error (b->a): %v", err)
+		}
 	}()
 }
