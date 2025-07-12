@@ -17,74 +17,61 @@ import (
 )
 
 func Start(cfg config.Config) error {
-	addr := cfg.ListenAddr
-	if addr == "" {
-		addr = ":8080"
-	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Request %s %s\n", r.Method, r.Host)
 		HandleRequest(w, r, cfg)
 	})
 	log.Printf("Starting proxy on %s (upstream=%s, auth=%s, exceptions=%v)\n",
-		addr, cfg.UpstreamProxy, cfg.ProxyAuth, cfg.ProxyExceptions,
+		cfg.ListenAddr, cfg.UpstreamProxy, cfg.ProxyAuth, cfg.ProxyExceptions,
 	)
-	return http.ListenAndServe(addr, handler)
+	return http.ListenAndServe(cfg.ListenAddr, handler)
 }
 
 func HandleRequest(w http.ResponseWriter, req *http.Request, cfg config.Config) {
 	if req.Method == http.MethodConnect {
-		handleTunneling(w, req, cfg)
+		HandleHttps(w, req, cfg)
 	} else {
-		handleHTTP(w, req, cfg)
+		HandleHttp(w, req, cfg)
 	}
 }
 
-func handleHTTP(w http.ResponseWriter, req *http.Request, cfg config.Config) {
-	if shouldBypass(req.Host, cfg.ProxyExceptions) {
-		proxyDirect(w, req)
+func HandleHttps(w http.ResponseWriter, req *http.Request, cfg config.Config) {
+	useUpstream := !Bypass(req.Host, cfg.ProxyExceptions)
+	EstablishTunnel(w, req, cfg, useUpstream)
+}
+
+func HandleHttp(w http.ResponseWriter, req *http.Request, cfg config.Config) {
+	var transport http.RoundTripper
+	if Bypass(req.Host, cfg.ProxyExceptions) {
+		transport = http.DefaultTransport
 	} else {
-		proxyToUpstream(w, req, cfg)
+		transport = NewUpstreamTransport(cfg)
 	}
+	ProxyRequest(w, req, transport)
 }
 
-func proxyDirect(w http.ResponseWriter, req *http.Request) {
-	transport := http.DefaultTransport
-
-	outbound := cloneRequestForClient(req)
-	resp, err := transport.RoundTrip(outbound)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-	copyResponse(w, resp)
-}
-
-func proxyToUpstream(w http.ResponseWriter, req *http.Request, cfg config.Config) {
-	client := &http.Client{
-		Transport: newUpstreamTransport(cfg),
-	}
-	outbound := cloneRequestForClient(req)
+func ProxyRequest(w http.ResponseWriter, req *http.Request, transport http.RoundTripper) {
+	client := &http.Client{Transport: transport}
+	outbound := CloneRequest(req)
 	resp, err := client.Do(outbound)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
-	copyResponse(w, resp)
+	CopyResponse(w, resp)
 }
 
-func cloneRequestForClient(req *http.Request) *http.Request {
-	outbound := req.Clone(req.Context())
-	outbound.RequestURI = ""
-	if outbound.URL.Scheme == "" {
-		outbound.URL.Scheme = "http"
+func Bypass(host string, exceptions []string) bool {
+	for _, ex := range exceptions {
+		if strings.EqualFold(host, ex) {
+			return true
+		}
 	}
-	outbound.URL.Host = req.Host
-	return outbound
+	return false
 }
 
-func newUpstreamTransport(cfg config.Config) http.RoundTripper {
+func NewUpstreamTransport(cfg config.Config) http.RoundTripper {
 	proxyURL, _ := url.Parse("http://" + cfg.UpstreamProxy)
 	base := &http.Transport{
 		Proxy: http.ProxyURL(proxyURL),
@@ -96,92 +83,86 @@ func newUpstreamTransport(cfg config.Config) http.RoundTripper {
 	return base
 }
 
-func handleTunneling(w http.ResponseWriter, req *http.Request, cfg config.Config) {
-	dest := req.Host
-	if shouldBypass(dest, cfg.ProxyExceptions) {
-		tunnel(w, req, dest)
-	} else {
-		tunnelViaUpstream(w, req, cfg, dest)
-	}
-}
+func EstablishTunnel(w http.ResponseWriter, req *http.Request, cfg config.Config, useUpstream bool) {
+	var backend net.Conn
+	var err error
 
-func tunnel(w http.ResponseWriter, _ *http.Request, dest string) {
-	backend, err := net.Dial("tcp", dest)
+	if useUpstream {
+		backend, err = DialViaUpstream(cfg.UpstreamProxy, req.Host)
+	} else {
+		backend, err = net.Dial("tcp", req.Host)
+	}
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to connect to destination %s: %v", dest, err), http.StatusServiceUnavailable)
+		http.Error(w, "Tunnel connection failed: "+err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	defer func() {
-		if backend != nil {
-			backend.Close()
-		}
-	}()
+
 	hj, ok := w.(http.Hijacker)
 	if !ok {
-		http.Error(w, "HTTP Hijacking not supported", http.StatusInternalServerError)
+		backend.Close()
+		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
 		return
 	}
+
 	clientConn, _, err := hj.Hijack()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to hijack connection: %v", err), http.StatusServiceUnavailable)
+		backend.Close()
+		http.Error(w, "Hijack failed: "+err.Error(), http.StatusServiceUnavailable)
 		return
 	}
+
 	_, _ = fmt.Fprint(clientConn, "HTTP/1.1 200 Connection Established\r\n\r\n")
-	backend = nil
-	pipe(clientConn, backend)
+	Pipe(clientConn, backend)
 }
 
-func tunnelViaUpstream(w http.ResponseWriter, _ *http.Request, cfg config.Config, dest string) {
-	proxyAddr := cfg.UpstreamProxy
+func DialViaUpstream(proxyAddr, target string) (net.Conn, error) {
 	conn, err := net.Dial("tcp", proxyAddr)
 	if err != nil {
-		http.Error(w, "Failed to connect to upstream proxy: "+err.Error(), http.StatusBadGateway)
-		return
+		return nil, fmt.Errorf("upstream dial failed: %w", err)
 	}
-	connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", dest, dest)
+
+	connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", target, target)
 	if _, err := conn.Write([]byte(connectReq)); err != nil {
 		conn.Close()
-		http.Error(w, "Failed to send CONNECT request: "+err.Error(), http.StatusBadGateway)
-		return
+		return nil, fmt.Errorf("failed to send CONNECT: %w", err)
 	}
+
 	br := bufio.NewReader(conn)
 	resp, err := http.ReadResponse(br, &http.Request{Method: http.MethodConnect})
 	if err != nil {
 		conn.Close()
-		http.Error(w, "Failed to read proxy response: "+err.Error(), http.StatusBadGateway)
-		return
+		return nil, fmt.Errorf("bad CONNECT response: %w", err)
 	}
+
 	if resp.StatusCode != http.StatusOK {
 		conn.Close()
-		http.Error(w, "Proxy CONNECT failed: "+resp.Status, http.StatusBadGateway)
-		return
+		return nil, fmt.Errorf("upstream CONNECT failed: %s", resp.Status)
 	}
-	hj, ok := w.(http.Hijacker)
-	if !ok {
-		conn.Close()
-		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
-		return
-	}
-	clientConn, _, err := hj.Hijack()
-	if err != nil {
-		conn.Close()
-		http.Error(w, "Failed to hijack connection: "+err.Error(), http.StatusServiceUnavailable)
-		return
-	}
-	fmt.Fprintf(clientConn, "HTTP/1.1 200 Connection Established\r\n\r\n")
-	pipe(clientConn, conn)
+
+	return conn, nil
 }
 
-func shouldBypass(host string, exceptions []string) bool {
-	for _, ex := range exceptions {
-		if strings.EqualFold(host, ex) {
-			return true
+func CloneRequest(req *http.Request) *http.Request {
+	outbound := req.Clone(req.Context())
+	outbound.RequestURI = ""
+	if outbound.URL.Scheme == "" {
+		outbound.URL.Scheme = "http"
+	}
+	outbound.URL.Host = req.Host
+	return outbound
+}
+
+func CopyResponse(w http.ResponseWriter, resp *http.Response) {
+	for k, vs := range resp.Header {
+		for _, v := range vs {
+			w.Header().Add(k, v)
 		}
 	}
-	return false
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
-func pipe(a, b net.Conn) {
+func Pipe(a, b net.Conn) {
 	go func() {
 		defer a.Close()
 		defer b.Close()
@@ -192,14 +173,4 @@ func pipe(a, b net.Conn) {
 		defer b.Close()
 		io.Copy(b, a)
 	}()
-}
-
-func copyResponse(w http.ResponseWriter, resp *http.Response) {
-	for k, vs := range resp.Header {
-		for _, v := range vs {
-			w.Header().Add(k, v)
-		}
-	}
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
 }

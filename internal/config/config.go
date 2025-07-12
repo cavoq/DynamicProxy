@@ -15,27 +15,27 @@ type Config struct {
 
 func LoadConfig() Config {
 	config := Config{
-		UpstreamProxy:   getEnv("UPSTREAM_PROXY", ""),
+		UpstreamProxy:   GetEnv("UPSTREAM_PROXY", ""),
 		ProxyExceptions: []string{},
-		ListenAddr:      getEnv("LISTEN_ADDR", ":8080"),
-		ProxyAuth:       getEnv("PROXY_AUTH", ""),
+		ListenAddr:      GetEnv("LISTEN_ADDR", ":8080"),
+		ProxyAuth:       GetEnv("PROXY_AUTH", ""),
 	}
 
 	if exceptions := os.Getenv("PROXY_EXCEPTIONS"); exceptions != "" {
-		config.ProxyExceptions = parseList(exceptions)
+		config.ProxyExceptions = GetExceptions(exceptions)
 	}
 
 	return config
 }
 
-func getEnv(key, defaultVal string) string {
+func GetEnv(key, defaultVal string) string {
 	if val, ok := os.LookupEnv(key); ok {
 		return val
 	}
 	return defaultVal
 }
 
-func parseList(s string) []string {
+func GetExceptions(s string) []string {
 	if s == "" {
 		return nil
 	}
@@ -59,7 +59,7 @@ func parseList(s string) []string {
 	return list
 }
 
-func isException(host string, exceptions []string) bool {
+func IsException(host string, exceptions []string) bool {
 	for _, pattern := range exceptions {
 		if after, ok := strings.CutPrefix(pattern, "*."); ok {
 			suffix := after

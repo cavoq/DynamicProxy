@@ -8,7 +8,7 @@ func TestParseList(t *testing.T) {
 	input := "http://localhost, *.example.com, api.svc.com, https://www.test.org/"
 	expected := []string{"localhost", "*.example.com", "api.svc.com", "www.test.org"}
 
-	result := parseList(input)
+	result := GetExceptions(input)
 
 	if len(result) != len(expected) {
 		t.Fatalf("expected %d items, got %d", len(expected), len(result))
@@ -38,8 +38,8 @@ func TestIsException(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if isException(tt.host, exceptions) != tt.expected {
-			t.Errorf("isException(%q) = %v; expected %v", tt.host, !tt.expected, tt.expected)
+		if IsException(tt.host, exceptions) != tt.expected {
+			t.Errorf("IsException(%q) = %v; expected %v", tt.host, !tt.expected, tt.expected)
 		}
 	}
 }
