@@ -13,7 +13,7 @@ import (
 	"regexp"
 	"strings"
 
-	"DynamicProxy/internal/config"
+	"github.com/cavoq/DynamicProxy/internal/config"
 
 	"github.com/Azure/go-ntlmssp"
 )

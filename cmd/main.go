@@ -1,9 +1,10 @@
 package main
 
 import (
-	"DynamicProxy/internal/config"
-	"DynamicProxy/internal/proxy"
 	"log"
+
+	"github.com/cavoq/DynamicProxy/internal/config"
+	"github.com/cavoq/DynamicProxy/internal/proxy"
 )
 
 func main() {

@@ -1,4 +1,4 @@
-module DynamicProxy
+module github.com/cavoq/DynamicProxy
 
 go 1.24.5
 
