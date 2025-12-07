@@ -31,7 +31,7 @@ To configure DynamicProxy, you need to set up the following environment variable
 - `PROXY_EXCEPTIONS`: A comma-separated list of hostnames or IPs that should bypass the upstream proxy (e.g. `localhost,somehost1,somehost2`).
 - `PROXY_AUTH`: Optional authentication for the upstream proxy (currently only ntlm for windows is supported, e.g. `ntlm`).
 
-You can then run the binary like usual:
+You can then run the binary:
 
 ```bash
 ./DynamicProxy
@@ -39,9 +39,32 @@ You can then run the binary like usual:
 
 ## 🛠️ Building from Source
 
-To build DynamicProxy from source, ensure you have Go 1.24.5 or later installed and run the following commands:
+To build DynamicProxy from source, ensure you have Go 1.24.0 or later installed and run the following commands:
 
 ```bash
 go mod tidy
-go build -o DynamicProxy ./cmd/main.go
+go build -o dynamicproxy ./cmd/main.go
+```
+
+## 🐳 Docker
+
+### Build the image
+
+```bash
+docker build -t dynamicproxy .
+```
+
+### Run the container
+
+```bash
+docker run -d -p 8080:8080 \
+  -e UPSTREAM_PROXY=corporate.proxy:8080 \
+  -e PROXY_EXCEPTIONS=localhost,internal.host \
+  dynamicproxy
+```
+
+### Run tests in Docker
+
+```bash
+docker build --target test .
 ```
