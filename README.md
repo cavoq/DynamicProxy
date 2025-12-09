@@ -1,8 +1,6 @@
-# DynamicProxy
+# 🔀 DynamicProxy
 
-**Dynamic HTTP Forward Proxy with Upstream Proxy Switching**
-
-## 🧭 Overview
+[![Go Report Card](https://goreportcard.com/badge/github.com/cavoq/DynamicProxy)](https://goreportcard.com/report/github.com/cavoq/DynamicProxy)
 
 DynamicProxy is a lightweight HTTP forward proxy designed for flexible upstream proxy switching based on request context. It was built to overcome limitations in environments where only a single static proxy can be configured — like in [Mapsui](https://github.com/Mapsui/Mapsui) with [GDAL](https://gdal.org/) on Windows.
 
