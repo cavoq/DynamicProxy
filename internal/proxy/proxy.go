@@ -24,11 +24,20 @@ var (
 	Error = log.New(os.Stderr, "ERROR: ", log.Ldate|log.Ltime|log.Lmsgprefix)
 )
 
+type requestTransports struct {
+	direct   http.RoundTripper
+	upstream http.RoundTripper
+}
+
 func Start(cfg config.Config) error {
 	Info.Printf("Starting proxy on %s (upstream=%s, auth=%s, exceptions=%v)",
 		cfg.ListenAddr, cfg.UpstreamProxy, cfg.ProxyAuth, cfg.ProxyExceptions)
+	transports := requestTransports{
+		direct:   NewDirectTransport(cfg),
+		upstream: NewUpstreamTransport(cfg),
+	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		HandleRequest(w, r, cfg)
+		handleRequestWithTransports(w, r, cfg, transports)
 	})
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -43,11 +52,19 @@ func Start(cfg config.Config) error {
 }
 
 func HandleRequest(w http.ResponseWriter, req *http.Request, cfg config.Config) {
+	transports := requestTransports{
+		direct:   NewDirectTransport(cfg),
+		upstream: NewUpstreamTransport(cfg),
+	}
+	handleRequestWithTransports(w, req, cfg, transports)
+}
+
+func handleRequestWithTransports(w http.ResponseWriter, req *http.Request, cfg config.Config, transports requestTransports) {
 	Info.Printf("Processing request %s %s", req.Method, req.Host)
 	if req.Method == http.MethodConnect {
 		HandleHttps(w, req, cfg)
 	} else {
-		HandleHttp(w, req, cfg)
+		handleHttpWithTransports(w, req, cfg, transports)
 	}
 }
 
@@ -57,11 +74,19 @@ func HandleHttps(w http.ResponseWriter, req *http.Request, cfg config.Config) {
 }
 
 func HandleHttp(w http.ResponseWriter, req *http.Request, cfg config.Config) {
+	transports := requestTransports{
+		direct:   NewDirectTransport(cfg),
+		upstream: NewUpstreamTransport(cfg),
+	}
+	handleHttpWithTransports(w, req, cfg, transports)
+}
+
+func handleHttpWithTransports(w http.ResponseWriter, req *http.Request, cfg config.Config, transports requestTransports) {
 	var transport http.RoundTripper
 	if Bypass(req.Host, cfg.ProxyExceptions) {
-		transport = NewDirectTransport(cfg)
+		transport = transports.direct
 	} else {
-		transport = NewUpstreamTransport(cfg)
+		transport = transports.upstream
 	}
 	ProxyRequest(w, req, transport, cfg)
 }
