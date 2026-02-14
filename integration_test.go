@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -136,8 +138,18 @@ type dynamicProxy struct {
 func startDynamicProxy(t *testing.T, upstreamURL, exceptions string) *dynamicProxy {
 	t.Helper()
 
-	if _, err := exec.LookPath("./dynamicproxy"); err != nil {
-		build := exec.Command("go", "build", "-o", "dynamicproxy", "./cmd/main.go")
+	binaryName := "dynamicproxy"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	binaryPath := filepath.Join(".", binaryName)
+	absBinaryPath, err := filepath.Abs(binaryPath)
+	if err != nil {
+		t.Fatalf("failed to resolve binary path: %v", err)
+	}
+
+	if _, err := os.Stat(absBinaryPath); err != nil {
+		build := exec.Command("go", "build", "-o", binaryPath, "./cmd/main.go")
 		build.Stdout = os.Stdout
 		build.Stderr = os.Stderr
 		if err := build.Run(); err != nil {
@@ -145,7 +157,7 @@ func startDynamicProxy(t *testing.T, upstreamURL, exceptions string) *dynamicPro
 		}
 	}
 
-	cmd := exec.Command("./dynamicproxy")
+	cmd := exec.Command(absBinaryPath)
 	cmd.Env = append(os.Environ(),
 		"UPSTREAM_PROXY="+upstreamURL,
 		"PROXY_EXCEPTIONS="+exceptions,

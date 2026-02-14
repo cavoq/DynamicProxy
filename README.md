@@ -2,7 +2,7 @@
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/cavoq/DynamicProxy)](https://goreportcard.com/report/github.com/cavoq/DynamicProxy)
 
-DynamicProxy is a lightweight HTTP forward proxy designed for flexible upstream proxy switching based on request context. It was built to overcome limitations in environments where only a single static proxy can be configured — like in [Mapsui](https://github.com/Mapsui/Mapsui) with [GDAL](https://gdal.org/) on Windows.
+DynamicProxy is a lightweight HTTP forward proxy designed for flexible upstream proxy switching based on request context. It was built to overcome limitations in environments where only a single static proxy can be configured - like in [Mapsui](https://github.com/Mapsui/Mapsui) with [GDAL](https://gdal.org/) on Windows.
 
 This proxy enables both **internal** and **external** geo services to work seamlessly without reconfiguring or restarting your app. It dynamically routes requests through the appropriate upstream proxy or direct connection, based on rules you define.
 

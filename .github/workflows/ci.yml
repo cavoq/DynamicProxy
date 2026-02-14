@@ -39,7 +39,7 @@ jobs:
         run: go test ./... -v
 
   docker:
-    name: Docker Build Stages
+    name: Docker Build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
