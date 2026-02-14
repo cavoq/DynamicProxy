@@ -1,2 +1,15 @@
-LICENSE
-README.md
+.git
+.gitignore
+.dockerignore
+dynamicproxy
+bin/
+*.test
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+go.work
+go.work.sum
+.env
+.idea/
+.vscode/
