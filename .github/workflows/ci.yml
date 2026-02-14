@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Go Build
+        run: go build ./...
+
+      - name: Go Test
+        run: go test ./... -v
+
+  docker:
+    name: Docker Build Stages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build test stage
+        run: docker build --target test -t dynamicproxy:test .
+
+      - name: Build runtime image
+        run: docker build -t dynamicproxy:ci .
