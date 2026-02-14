@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/cavoq/DynamicProxy/internal/config"
 
@@ -29,7 +30,16 @@ func Start(cfg config.Config) error {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		HandleRequest(w, r, cfg)
 	})
-	return http.ListenAndServe(cfg.ListenAddr, handler)
+	server := &http.Server{
+		Addr:              cfg.ListenAddr,
+		Handler:           handler,
+		ReadHeaderTimeout: cfg.ServerReadHeaderTimeout,
+		ReadTimeout:       cfg.ServerReadTimeout,
+		WriteTimeout:      cfg.ServerWriteTimeout,
+		IdleTimeout:       cfg.ServerIdleTimeout,
+		MaxHeaderBytes:    cfg.ServerMaxHeaderBytes,
+	}
+	return server.ListenAndServe()
 }
 
 func HandleRequest(w http.ResponseWriter, req *http.Request, cfg config.Config) {
@@ -49,15 +59,18 @@ func HandleHttps(w http.ResponseWriter, req *http.Request, cfg config.Config) {
 func HandleHttp(w http.ResponseWriter, req *http.Request, cfg config.Config) {
 	var transport http.RoundTripper
 	if Bypass(req.Host, cfg.ProxyExceptions) {
-		transport = http.DefaultTransport
+		transport = NewDirectTransport(cfg)
 	} else {
 		transport = NewUpstreamTransport(cfg)
 	}
-	ProxyRequest(w, req, transport)
+	ProxyRequest(w, req, transport, cfg)
 }
 
-func ProxyRequest(w http.ResponseWriter, req *http.Request, transport http.RoundTripper) {
-	client := &http.Client{Transport: transport}
+func ProxyRequest(w http.ResponseWriter, req *http.Request, transport http.RoundTripper, cfg config.Config) {
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   cfg.ClientRequestTimeout,
+	}
 	outbound := CloneRequest(req)
 	resp, err := client.Do(outbound)
 	if err != nil {
@@ -73,15 +86,17 @@ func Bypass(host string, exceptions []string) bool {
 	return config.IsException(host, exceptions)
 }
 
+func NewDirectTransport(cfg config.Config) http.RoundTripper {
+	return newTransport(cfg, nil)
+}
+
 func NewUpstreamTransport(cfg config.Config) http.RoundTripper {
-	url, err := url.Parse("http://" + cfg.UpstreamProxy)
+	proxyURL, err := url.Parse("http://" + cfg.UpstreamProxy)
 	if err != nil {
 		Error.Printf("Invalid upstream proxy url %q: %v", cfg.UpstreamProxy, err)
-		return http.DefaultTransport
+		return NewDirectTransport(cfg)
 	}
-	base := &http.Transport{
-		Proxy: http.ProxyURL(url),
-	}
+	base := newTransport(cfg, proxyURL)
 	if strings.EqualFold(cfg.ProxyAuth, "ntlm") {
 		base.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{} // Disable HTTP/2 for NTLM
 		return ntlmssp.Negotiator{RoundTripper: base}
@@ -89,14 +104,34 @@ func NewUpstreamTransport(cfg config.Config) http.RoundTripper {
 	return base
 }
 
+func newTransport(cfg config.Config, proxyURL *url.URL) *http.Transport {
+	dialer := &net.Dialer{
+		Timeout:   cfg.TransportDialTimeout,
+		KeepAlive: cfg.TransportKeepAlive,
+	}
+	tr := &http.Transport{
+		DialContext:           dialer.DialContext,
+		TLSHandshakeTimeout:   cfg.TransportTLSHandshakeTimeout,
+		ResponseHeaderTimeout: cfg.TransportResponseHeaderTimeout,
+		ExpectContinueTimeout: cfg.TransportExpectContinueTimeout,
+		IdleConnTimeout:       cfg.TransportIdleConnTimeout,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+	}
+	if proxyURL != nil {
+		tr.Proxy = http.ProxyURL(proxyURL)
+	}
+	return tr
+}
+
 func EstablishTunnel(w http.ResponseWriter, req *http.Request, cfg config.Config, useUpstream bool) {
 	var backend net.Conn
 	var err error
 
 	if useUpstream {
-		backend, err = DialViaUpstream(cfg.UpstreamProxy, req.Host)
+		backend, err = DialViaUpstream(cfg.UpstreamProxy, req.Host, cfg)
 	} else {
-		backend, err = net.Dial("tcp", req.Host)
+		backend, err = net.DialTimeout("tcp", req.Host, cfg.TransportDialTimeout)
 	}
 	if err != nil {
 		Error.Printf("Tunnel connection failed to %s: %v", req.Host, err)
@@ -124,10 +159,14 @@ func EstablishTunnel(w http.ResponseWriter, req *http.Request, cfg config.Config
 	Pipe(clientConn, backend)
 }
 
-func DialViaUpstream(proxyAddr, target string) (net.Conn, error) {
-	conn, err := net.Dial("tcp", proxyAddr)
+func DialViaUpstream(proxyAddr, target string, cfg config.Config) (net.Conn, error) {
+	conn, err := net.DialTimeout("tcp", proxyAddr, cfg.TransportDialTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("upstream dial failed: %w", err)
+	}
+	if err := conn.SetDeadline(time.Now().Add(cfg.TunnelConnectReadWriteTimeout)); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to set upstream CONNECT deadline: %w", err)
 	}
 
 	connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", target, target)
@@ -146,6 +185,10 @@ func DialViaUpstream(proxyAddr, target string) (net.Conn, error) {
 	if resp.StatusCode != http.StatusOK {
 		conn.Close()
 		return nil, fmt.Errorf("upstream CONNECT failed: %s", resp.Status)
+	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to clear upstream CONNECT deadline: %w", err)
 	}
 
 	return conn, nil

@@ -11,7 +11,7 @@ func main() {
 	cfg := config.LoadConfig()
 
 	if cfg.ListenAddr == "" {
-		cfg.ListenAddr = "0.0.0.0:8080"
+		cfg.ListenAddr = ":8080"
 	}
 
 	log.Printf("Upstream Proxy: %s", cfg.UpstreamProxy)

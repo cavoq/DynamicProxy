@@ -1,9 +1,11 @@
 package config
 
 import (
+	"os"
 	"reflect"
 	"regexp"
 	"testing"
+	"time"
 )
 
 func TestParseList(t *testing.T) {
@@ -127,5 +129,173 @@ func TestWildcardPatternToRegex(t *testing.T) {
 
 	if matched, _ := regexp.MatchString(regex, "example.com"); matched {
 		t.Fatal("expected wildcard regex not to match apex domain")
+	}
+}
+
+func TestGetEnvDuration(t *testing.T) {
+	const key = "DYNAMIC_PROXY_TEST_DURATION"
+	defaultVal := 9 * time.Second
+
+	t.Setenv(key, "25s")
+	if got := GetEnvDuration(key, defaultVal); got != 25*time.Second {
+		t.Fatalf("GetEnvDuration valid = %v; expected %v", got, 25*time.Second)
+	}
+
+	t.Setenv(key, "invalid")
+	if got := GetEnvDuration(key, defaultVal); got != defaultVal {
+		t.Fatalf("GetEnvDuration invalid = %v; expected default %v", got, defaultVal)
+	}
+
+	t.Setenv(key, "0s")
+	if got := GetEnvDuration(key, defaultVal); got != defaultVal {
+		t.Fatalf("GetEnvDuration zero = %v; expected default %v", got, defaultVal)
+	}
+}
+
+func TestGetEnvInt(t *testing.T) {
+	const key = "DYNAMIC_PROXY_TEST_INT"
+	defaultVal := 123
+
+	t.Setenv(key, "456")
+	if got := GetEnvInt(key, defaultVal); got != 456 {
+		t.Fatalf("GetEnvInt valid = %d; expected %d", got, 456)
+	}
+
+	t.Setenv(key, "oops")
+	if got := GetEnvInt(key, defaultVal); got != defaultVal {
+		t.Fatalf("GetEnvInt invalid = %d; expected default %d", got, defaultVal)
+	}
+
+	t.Setenv(key, "0")
+	if got := GetEnvInt(key, defaultVal); got != defaultVal {
+		t.Fatalf("GetEnvInt zero = %d; expected default %d", got, defaultVal)
+	}
+}
+
+func TestLoadConfigTimeoutOverrides(t *testing.T) {
+	// Keep this explicit so we can assert each env variable wiring.
+	t.Setenv("SERVER_READ_HEADER_TIMEOUT", "11s")
+	t.Setenv("SERVER_READ_TIMEOUT", "22s")
+	t.Setenv("SERVER_WRITE_TIMEOUT", "33s")
+	t.Setenv("SERVER_IDLE_TIMEOUT", "44s")
+	t.Setenv("SERVER_MAX_HEADER_BYTES", "2048")
+	t.Setenv("CLIENT_REQUEST_TIMEOUT", "55s")
+	t.Setenv("TRANSPORT_DIAL_TIMEOUT", "6s")
+	t.Setenv("TRANSPORT_KEEP_ALIVE", "7s")
+	t.Setenv("TRANSPORT_TLS_HANDSHAKE_TIMEOUT", "8s")
+	t.Setenv("TRANSPORT_RESPONSE_HEADER_TIMEOUT", "9s")
+	t.Setenv("TRANSPORT_EXPECT_CONTINUE_TIMEOUT", "10s")
+	t.Setenv("TRANSPORT_IDLE_CONN_TIMEOUT", "12s")
+	t.Setenv("TUNNEL_CONNECT_READ_WRITE_TIMEOUT", "13s")
+
+	cfg := LoadConfig()
+
+	if cfg.ServerReadHeaderTimeout != 11*time.Second {
+		t.Fatalf("ServerReadHeaderTimeout = %v", cfg.ServerReadHeaderTimeout)
+	}
+	if cfg.ServerReadTimeout != 22*time.Second {
+		t.Fatalf("ServerReadTimeout = %v", cfg.ServerReadTimeout)
+	}
+	if cfg.ServerWriteTimeout != 33*time.Second {
+		t.Fatalf("ServerWriteTimeout = %v", cfg.ServerWriteTimeout)
+	}
+	if cfg.ServerIdleTimeout != 44*time.Second {
+		t.Fatalf("ServerIdleTimeout = %v", cfg.ServerIdleTimeout)
+	}
+	if cfg.ServerMaxHeaderBytes != 2048 {
+		t.Fatalf("ServerMaxHeaderBytes = %d", cfg.ServerMaxHeaderBytes)
+	}
+	if cfg.ClientRequestTimeout != 55*time.Second {
+		t.Fatalf("ClientRequestTimeout = %v", cfg.ClientRequestTimeout)
+	}
+	if cfg.TransportDialTimeout != 6*time.Second {
+		t.Fatalf("TransportDialTimeout = %v", cfg.TransportDialTimeout)
+	}
+	if cfg.TransportKeepAlive != 7*time.Second {
+		t.Fatalf("TransportKeepAlive = %v", cfg.TransportKeepAlive)
+	}
+	if cfg.TransportTLSHandshakeTimeout != 8*time.Second {
+		t.Fatalf("TransportTLSHandshakeTimeout = %v", cfg.TransportTLSHandshakeTimeout)
+	}
+	if cfg.TransportResponseHeaderTimeout != 9*time.Second {
+		t.Fatalf("TransportResponseHeaderTimeout = %v", cfg.TransportResponseHeaderTimeout)
+	}
+	if cfg.TransportExpectContinueTimeout != 10*time.Second {
+		t.Fatalf("TransportExpectContinueTimeout = %v", cfg.TransportExpectContinueTimeout)
+	}
+	if cfg.TransportIdleConnTimeout != 12*time.Second {
+		t.Fatalf("TransportIdleConnTimeout = %v", cfg.TransportIdleConnTimeout)
+	}
+	if cfg.TunnelConnectReadWriteTimeout != 13*time.Second {
+		t.Fatalf("TunnelConnectReadWriteTimeout = %v", cfg.TunnelConnectReadWriteTimeout)
+	}
+}
+
+func TestLoadConfigTimeoutDefaults(t *testing.T) {
+	clearEnv(t,
+		"SERVER_READ_HEADER_TIMEOUT",
+		"SERVER_READ_TIMEOUT",
+		"SERVER_WRITE_TIMEOUT",
+		"SERVER_IDLE_TIMEOUT",
+		"SERVER_MAX_HEADER_BYTES",
+		"CLIENT_REQUEST_TIMEOUT",
+		"TRANSPORT_DIAL_TIMEOUT",
+		"TRANSPORT_KEEP_ALIVE",
+		"TRANSPORT_TLS_HANDSHAKE_TIMEOUT",
+		"TRANSPORT_RESPONSE_HEADER_TIMEOUT",
+		"TRANSPORT_EXPECT_CONTINUE_TIMEOUT",
+		"TRANSPORT_IDLE_CONN_TIMEOUT",
+		"TUNNEL_CONNECT_READ_WRITE_TIMEOUT",
+	)
+
+	cfg := LoadConfig()
+
+	if cfg.ServerReadHeaderTimeout != defaultServerReadHeaderTimeout {
+		t.Fatalf("ServerReadHeaderTimeout default = %v", cfg.ServerReadHeaderTimeout)
+	}
+	if cfg.ServerReadTimeout != defaultServerReadTimeout {
+		t.Fatalf("ServerReadTimeout default = %v", cfg.ServerReadTimeout)
+	}
+	if cfg.ServerWriteTimeout != defaultServerWriteTimeout {
+		t.Fatalf("ServerWriteTimeout default = %v", cfg.ServerWriteTimeout)
+	}
+	if cfg.ServerIdleTimeout != defaultServerIdleTimeout {
+		t.Fatalf("ServerIdleTimeout default = %v", cfg.ServerIdleTimeout)
+	}
+	if cfg.ServerMaxHeaderBytes != defaultServerMaxHeaderBytes {
+		t.Fatalf("ServerMaxHeaderBytes default = %d", cfg.ServerMaxHeaderBytes)
+	}
+	if cfg.ClientRequestTimeout != defaultClientRequestTimeout {
+		t.Fatalf("ClientRequestTimeout default = %v", cfg.ClientRequestTimeout)
+	}
+	if cfg.TransportDialTimeout != defaultTransportDialTimeout {
+		t.Fatalf("TransportDialTimeout default = %v", cfg.TransportDialTimeout)
+	}
+	if cfg.TransportKeepAlive != defaultTransportKeepAlive {
+		t.Fatalf("TransportKeepAlive default = %v", cfg.TransportKeepAlive)
+	}
+	if cfg.TransportTLSHandshakeTimeout != defaultTransportTLSHandshakeTimeout {
+		t.Fatalf("TransportTLSHandshakeTimeout default = %v", cfg.TransportTLSHandshakeTimeout)
+	}
+	if cfg.TransportResponseHeaderTimeout != defaultTransportResponseHeaderTimeout {
+		t.Fatalf("TransportResponseHeaderTimeout default = %v", cfg.TransportResponseHeaderTimeout)
+	}
+	if cfg.TransportExpectContinueTimeout != defaultTransportExpectContinueTimeout {
+		t.Fatalf("TransportExpectContinueTimeout default = %v", cfg.TransportExpectContinueTimeout)
+	}
+	if cfg.TransportIdleConnTimeout != defaultTransportIdleConnTimeout {
+		t.Fatalf("TransportIdleConnTimeout default = %v", cfg.TransportIdleConnTimeout)
+	}
+	if cfg.TunnelConnectReadWriteTimeout != defaultTunnelConnectReadWriteTimeout {
+		t.Fatalf("TunnelConnectReadWriteTimeout default = %v", cfg.TunnelConnectReadWriteTimeout)
+	}
+}
+
+func clearEnv(t *testing.T, keys ...string) {
+	t.Helper()
+	for _, key := range keys {
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("failed to unset env %q: %v", key, err)
+		}
 	}
 }

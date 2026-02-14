@@ -18,21 +18,37 @@ While working with **Mapsui + GDAL** on Windows, we encountered a limitation: on
 **DynamicProxy** solves this by acting as a smart middle layer:
 - It listens as a local proxy.
 - It inspects each request.
-- Based on destination (or other rules), it forwards via the right upstream proxy — or bypasses it entirely.
+- Based on destination (or other rules), it forwards via the right upstream proxy - or bypasses it entirely.
 
 ## 🚀 Getting Started
 
 To configure DynamicProxy, you need to set up the following environment variables:
 
-- `LISTEN_ADDR`: The address where the proxy will listen for incoming requests (default: `*:8080`).
+- `LISTEN_ADDR`: The address where the proxy will listen for incoming requests (default: `:8080`).
 - `UPSTREAM_PROXY`: The upstream proxy address to use for external requests (e.g. `corporate.proxy:8080`).
 - `PROXY_EXCEPTIONS`: A comma-separated list of hostnames or IPs that should bypass the upstream proxy (e.g. `localhost,somehost1,somehost2`).
 - `PROXY_AUTH`: Optional authentication for the upstream proxy (currently only ntlm for windows is supported, e.g. `ntlm`).
 
+Optional advanced timeout env vars (Go duration format, e.g. `10s`, `2m`):
+
+- `SERVER_READ_HEADER_TIMEOUT` (default: `10s`)
+- `SERVER_READ_TIMEOUT` (default: `30s`)
+- `SERVER_WRITE_TIMEOUT` (default: `30s`)
+- `SERVER_IDLE_TIMEOUT` (default: `120s`)
+- `SERVER_MAX_HEADER_BYTES` (default: `1048576`)
+- `CLIENT_REQUEST_TIMEOUT` (default: `60s`)
+- `TRANSPORT_DIAL_TIMEOUT` (default: `10s`)
+- `TRANSPORT_KEEP_ALIVE` (default: `30s`)
+- `TRANSPORT_TLS_HANDSHAKE_TIMEOUT` (default: `10s`)
+- `TRANSPORT_RESPONSE_HEADER_TIMEOUT` (default: `30s`)
+- `TRANSPORT_EXPECT_CONTINUE_TIMEOUT` (default: `1s`)
+- `TRANSPORT_IDLE_CONN_TIMEOUT` (default: `90s`)
+- `TUNNEL_CONNECT_READ_WRITE_TIMEOUT` (default: `15s`)
+
 You can then run the binary:
 
 ```bash
-./DynamicProxy
+./dynamicproxy
 ```
 
 ## 🛠️ Building from Source
