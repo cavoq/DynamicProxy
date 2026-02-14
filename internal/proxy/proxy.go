@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
 	"strings"
 
 	"github.com/cavoq/DynamicProxy/internal/config"
@@ -71,42 +70,7 @@ func ProxyRequest(w http.ResponseWriter, req *http.Request, transport http.Round
 }
 
 func Bypass(host string, exceptions []string) bool {
-	host = StripPort(host)
-
-	for _, pattern := range exceptions {
-		pattern = strings.TrimSpace(pattern)
-		if pattern == "" {
-			continue
-		}
-
-		if strings.Contains(pattern, "*") {
-			regex := WildcardToRegex(pattern)
-			if matched, err := regexp.MatchString(regex, host); err == nil && matched {
-				return true
-			} else if err != nil {
-				Warn.Printf("Invalid pattern %q in ProxyExceptions: %v", pattern, err)
-			}
-		} else {
-			if strings.EqualFold(host, pattern) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func StripPort(host string) string {
-	h, _, err := net.SplitHostPort(host)
-	if err == nil {
-		return h
-	}
-	return host
-}
-
-func WildcardToRegex(pattern string) string {
-	re := regexp.QuoteMeta(pattern)
-	re = strings.ReplaceAll(re, `\*`, ".*")
-	return "^" + re + "$"
+	return config.IsException(host, exceptions)
 }
 
 func NewUpstreamTransport(cfg config.Config) http.RoundTripper {

@@ -1,8 +1,10 @@
 package config
 
 import (
+	"net"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -60,15 +62,69 @@ func GetExceptions(s string) []string {
 }
 
 func IsException(host string, exceptions []string) bool {
+	hostCandidates := buildHostCandidates(host)
+	if len(hostCandidates) == 0 {
+		return false
+	}
+
 	for _, pattern := range exceptions {
-		if after, ok := strings.CutPrefix(pattern, "*."); ok {
-			suffix := after
-			if strings.HasSuffix(host, suffix) {
+		pattern = strings.TrimSpace(strings.TrimSuffix(pattern, "/"))
+		if pattern == "" {
+			continue
+		}
+
+		if strings.Contains(pattern, "*") {
+			regex := wildcardPatternToRegex(pattern)
+			for _, candidate := range hostCandidates {
+				if matched, err := regexp.MatchString(regex, candidate); err == nil && matched {
+					return true
+				}
+			}
+			continue
+		}
+
+		normalizedPattern := normalizeHostToken(pattern)
+		for _, candidate := range hostCandidates {
+			if strings.EqualFold(normalizeHostToken(candidate), normalizedPattern) {
 				return true
 			}
-		} else if host == pattern {
-			return true
 		}
 	}
+
 	return false
+}
+
+func buildHostCandidates(host string) []string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return nil
+	}
+
+	candidates := []string{host}
+	if withoutPort, ok := splitOutPort(host); ok && !strings.EqualFold(withoutPort, host) {
+		candidates = append(candidates, withoutPort)
+	}
+	return candidates
+}
+
+func splitOutPort(host string) (string, bool) {
+	h, _, err := net.SplitHostPort(host)
+	if err != nil {
+		return host, false
+	}
+	return h, true
+}
+
+func normalizeHostToken(token string) string {
+	token = strings.TrimSpace(token)
+	if strings.HasPrefix(token, "[") && strings.HasSuffix(token, "]") && len(token) > 2 {
+		return token[1 : len(token)-1]
+	}
+	return token
+}
+
+func wildcardPatternToRegex(pattern string) string {
+	re := regexp.QuoteMeta(pattern)
+	re = strings.ReplaceAll(re, `\*`, ".*")
+	return "(?i)^" + re + "$"
 }
